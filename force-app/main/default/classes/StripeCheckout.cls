@@ -1,144 +1,190 @@
 public class StripeCheckout {
-  private final String apiKey;
-  private final HttpCalloutService http;
-
-  public StripeCheckout() {
-    this(
-      Stripe_Configuration__mdt.getInstance('Default').API_Key__c,
-      new HttpCalloutService()
-    );
-  }
-
-  @TestVisible
-  private StripeCheckout(String apiKey, HttpCalloutService http) {
-    this.apiKey = apiKey;
-    this.http = http;
-  }
-
+  // Invocable method at top level
   @InvocableMethod(
     label='Create Stripe Checkout Session'
-    description='Creates a Stripe checkout session from a list of price IDs and configuration'
+    description='Creates a Stripe checkout session'
     category='Stripe'
   )
   public static List<String> createCheckoutSessions(
     List<CheckoutRequest> requests
   ) {
     List<String> results = new List<String>();
-    StripeCheckout stripe = new StripeCheckout();
+    CheckoutService service = new CheckoutService();
 
     for (CheckoutRequest req : requests) {
-      try {
-        results.add(stripe.createCheckoutSession(req));
-      } catch (Exception e) {
-        results.add('Error: ' + e.getMessage());
-      }
+      results.add(service.createCheckoutSession(req));
     }
     return results;
   }
 
-  private String createCheckoutSession(CheckoutRequest req) {
-    List<String> params = new List<String>();
+  // Service class to handle checkout operations
+  public class CheckoutService {
+    private final IStripeClient stripeClient;
 
-    // Add line items
-    List<String> items = req.priceItems.split(';');
-    for (Integer i = 0; i < items.size(); i++) {
-      List<String> parts = items[i].split(',');
-      String priceId = parts[0].trim();
-      Integer quantity = parts.size() > 1
-        ? Integer.valueOf(parts[1].trim())
-        : 1;
-
-      params.add(
-        'line_items[' +
-          i +
-          '][price]=' +
-          EncodingUtil.urlEncode(priceId, 'UTF-8')
-      );
-      params.add('line_items[' + i + '][quantity]=' + quantity);
-    }
-
-    // Required params
-    params.add('mode=payment');
-    params.add(
-      'success_url=' + EncodingUtil.urlEncode(req.successUrl, 'UTF-8')
-    );
-    params.add('cancel_url=' + EncodingUtil.urlEncode(req.cancelUrl, 'UTF-8'));
-    params.add(
-      'customer_email=' + EncodingUtil.urlEncode(req.customerEmail, 'UTF-8')
-    );
-
-    // Optional: Client Reference ID
-    if (String.isNotBlank(req.clientReferenceId)) {
-      params.add(
-        'client_reference_id=' +
-        EncodingUtil.urlEncode(req.clientReferenceId, 'UTF-8')
+    public CheckoutService() {
+      this(
+        new StripeClient(new DefaultStripeConfig(), new DefaultHttpClient())
       );
     }
 
-    // Optional: Custom Text
-    if (String.isNotBlank(req.customText)) {
-      params.add(
-        'custom_text[after_submit][message]=' +
-        EncodingUtil.urlEncode(req.customText, 'UTF-8')
-      );
+    @TestVisible
+    public CheckoutService(IStripeClient stripeClient) {
+      this.stripeClient = stripeClient;
     }
 
-    // Optional: Discounts
-    if (String.isNotBlank(req.couponId)) {
-      params.add(
-        'discounts[0][coupon]=' + EncodingUtil.urlEncode(req.couponId, 'UTF-8')
-      );
-    }
-    if (String.isNotBlank(req.promotionCode)) {
-      params.add(
-        'discounts[0][promotion_code]=' +
-        EncodingUtil.urlEncode(req.promotionCode, 'UTF-8')
-      );
-    }
-
-    // Optional: Phone Collection
-    if (req.collectPhoneNumber) {
-      params.add('phone_number_collection[enabled]=true');
-    }
-
-    // Optional: Submit Type
-    if (String.isNotBlank(req.submitType)) {
-      params.add(
-        'submit_type=' + EncodingUtil.urlEncode(req.submitType, 'UTF-8')
-      );
-    }
-
-    // Optional: After Expiration Recovery
-    if (req.enableExpirationRecovery) {
-      params.add('after_expiration[recovery][enabled]=true');
-    }
-
-    // Make request
-    HttpResponse res = http.post(
-      'https://api.stripe.com/v1/checkout/sessions',
-      String.join(params, '&'),
-      new Map<String, String>{
-        'Authorization' => 'Bearer ' + apiKey,
-        'Content-Type' => 'application/x-www-form-urlencoded'
+    public String createCheckoutSession(CheckoutRequest request) {
+      try {
+        Map<String, String> params = buildParams(request);
+        System.debug('About to call stripeClient.createCheckoutSession');
+        System.debug('stripeClient: ' + stripeClient);
+        String result = stripeClient.createCheckoutSession(params);
+        System.debug('Result from createCheckoutSession: ' + result);
+        return result;
+      } catch (Exception e) {
+        System.debug('Exception type: ' + e.getTypeName());
+        System.debug('Exception message: ' + e.getMessage());
+        System.debug('Exception stack trace: ' + e.getStackTraceString());
+        return 'Error: ' + e.getMessage();
       }
-    );
+    }
+    private Map<String, String> buildParams(CheckoutRequest req) {
+      Map<String, String> params = new Map<String, String>();
+      addLineItems(params, req.priceItems);
+      addRequiredParams(params, req);
+      addOptionalParams(params, req);
+      return params;
+    }
 
-    // Parse response
-    Map<String, Object> responseData = (Map<String, Object>) JSON.deserializeUntyped(
-      res.getBody()
-    );
-    if (res.getStatusCode() == 200) {
-      return (String) responseData.get('url');
-    } else {
+    private void addLineItems(Map<String, String> params, String priceItems) {
+      List<String> items = priceItems.split(';');
+      for (Integer i = 0; i < items.size(); i++) {
+        List<String> parts = items[i].split(',');
+        params.put('line_items[' + i + '][price]', parts[0].trim());
+        params.put(
+          'line_items[' + i + '][quantity]',
+          parts.size() > 1 ? parts[1].trim() : '1'
+        );
+      }
+    }
+
+    private void addRequiredParams(
+      Map<String, String> params,
+      CheckoutRequest req
+    ) {
+      params.put('mode', 'payment');
+      params.put('success_url', req.successUrl);
+      params.put('cancel_url', req.cancelUrl);
+      params.put('customer_email', req.customerEmail);
+    }
+
+    private void addOptionalParams(
+      Map<String, String> params,
+      CheckoutRequest req
+    ) {
+      if (String.isNotBlank(req.clientReferenceId)) {
+        params.put('client_reference_id', req.clientReferenceId);
+      }
+      if (String.isNotBlank(req.customText)) {
+        params.put('custom_text[after_submit][message]', req.customText);
+      }
+      if (String.isNotBlank(req.couponId)) {
+        params.put('discounts[0][coupon]', req.couponId);
+      }
+      if (String.isNotBlank(req.promotionCode)) {
+        params.put('discounts[0][promotion_code]', req.promotionCode);
+      }
+      if (req.collectPhoneNumber) {
+        params.put('phone_number_collection[enabled]', 'true');
+      }
+      if (String.isNotBlank(req.submitType)) {
+        params.put('submit_type', req.submitType);
+      }
+      if (req.enableExpirationRecovery) {
+        params.put('after_expiration[recovery][enabled]', 'true');
+      }
+    }
+  }
+
+  // Interfaces and implementations
+  public interface IStripeConfig {
+    String getApiKey();
+  }
+
+  public class DefaultStripeConfig implements IStripeConfig {
+    public String getApiKey() {
+      return Stripe_Configuration__mdt.getInstance('Default').API_Key__c;
+    }
+  }
+
+  public interface IHttpClient {
+    HttpResponse send(HttpRequest req);
+  }
+
+  public class DefaultHttpClient implements IHttpClient {
+    public HttpResponse send(HttpRequest req) {
+      return new Http().send(req);
+    }
+  }
+
+  public interface IStripeClient {
+    String createCheckoutSession(Map<String, String> params);
+  }
+
+  public class StripeClient implements IStripeClient {
+    private final IStripeConfig config;
+    private final IHttpClient httpClient;
+
+    public StripeClient(IStripeConfig config, IHttpClient httpClient) {
+      this.config = config;
+      this.httpClient = httpClient;
+    }
+
+    public String createCheckoutSession(Map<String, String> params) {
+      HttpRequest req = buildRequest(params);
+      HttpResponse res = httpClient.send(req);
+      return handleResponse(res);
+    }
+
+    private HttpRequest buildRequest(Map<String, String> params) {
+      HttpRequest req = new HttpRequest();
+      req.setEndpoint('https://api.stripe.com/v1/checkout/sessions');
+      req.setMethod('POST');
+      req.setHeader('Authorization', 'Bearer ' + config.getApiKey());
+      req.setHeader('Content-Type', 'application/x-www-form-urlencoded');
+      req.setBody(encodeParams(params));
+      return req;
+    }
+
+    private String handleResponse(HttpResponse res) {
+      Map<String, Object> responseData = (Map<String, Object>) JSON.deserializeUntyped(
+        res.getBody()
+      );
+
+      if (res.getStatusCode() == 200) {
+        return (String) responseData.get('url');
+      }
+
       Map<String, Object> error = (Map<String, Object>) responseData.get(
         'error'
       );
       throw new StripeException((String) error.get('message'));
     }
+
+    private String encodeParams(Map<String, String> params) {
+      List<String> encodedParams = new List<String>();
+      for (String key : params.keySet()) {
+        encodedParams.add(
+          EncodingUtil.urlEncode(key, 'UTF-8') +
+            '=' +
+            EncodingUtil.urlEncode(params.get(key), 'UTF-8')
+        );
+      }
+      return String.join(encodedParams, '&');
+    }
   }
 
+  // Request class
   public class CheckoutRequest {
-    // Required parameters
     @InvocableVariable(
       label='Price Items'
       description='Format: "priceId,quantity;priceId,quantity" Example: "price_H5ggYwtDq4fbrJ,1;price_L7khUytRq9gmK,2"'
@@ -155,7 +201,6 @@ public class StripeCheckout {
     @InvocableVariable(label='Cancel URL' required=true)
     public String cancelUrl;
 
-    // Optional Parameters
     @InvocableVariable(
       label='Client Reference ID'
       description='A unique identifier for the checkout session'
@@ -204,8 +249,14 @@ public class StripeCheckout {
       required=false
     )
     public Boolean enableExpirationRecovery;
+
+    public CheckoutRequest() {
+      this.collectPhoneNumber = false;
+      this.enableExpirationRecovery = false;
+    }
   }
 
+  // Exception class
   public class StripeException extends Exception {
   }
 }

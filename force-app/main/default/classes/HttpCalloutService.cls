@@ -1,4 +1,4 @@
-public class HttpCalloutService {
+public class HttpCalloutService implements IHttpCalloutService {
   public HttpResponse post(
     String endpoint,
     String body,

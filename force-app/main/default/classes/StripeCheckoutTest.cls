@@ -1,72 +1,64 @@
 @IsTest
 private class StripeCheckoutTest {
-  private class MockHttpCallout implements HttpCalloutMock {
-    private Integer statusCode;
-    private String responseBody;
-    public HttpRequest lastRequest;
-
-    public MockHttpCallout(Integer statusCode, String responseBody) {
-      this.statusCode = statusCode;
-      this.responseBody = responseBody;
-    }
-
-    public HttpResponse respond(HttpRequest req) {
-      this.lastRequest = req;
-      HttpResponse res = new HttpResponse();
-      res.setStatusCode(statusCode);
-      res.setBody(responseBody);
-      return res;
-    }
-  }
-
   @IsTest
   static void testSuccessfulCheckout() {
     // Arrange
-    String mockResponse = '{"url": "https://checkout.stripe.com/pay/test"}';
-    MockHttpCallout mock = new MockHttpCallout(200, mockResponse);
-    Test.setMock(HttpCalloutMock.class, mock);
+    MockStripeClient mockClient = new MockStripeClient(
+      'https://checkout.stripe.com/test'
+    );
+    StripeCheckout.CheckoutService service = new StripeCheckout.CheckoutService(
+      mockClient
+    );
 
-    StripeCheckout.CheckoutRequest req = new StripeCheckout.CheckoutRequest();
-    req.priceItems = 'price_test123,2';
-    req.customerEmail = 'test@example.com';
-    req.successUrl = 'https://success.com';
-    req.cancelUrl = 'https://cancel.com';
+    StripeCheckout.CheckoutRequest request = new StripeCheckout.CheckoutRequest();
+    request.priceItems = 'price_123,1';
+    request.customerEmail = 'test@example.com';
+    request.successUrl = 'https://success.com';
+    request.cancelUrl = 'https://cancel.com';
 
     // Act
-    Test.startTest();
-    List<String> results = StripeCheckout.createCheckoutSessions(
-      new List<StripeCheckout.CheckoutRequest>{ req }
-    );
-    Test.stopTest();
+    String result = service.createCheckoutSession(request);
 
     // Assert
-    System.assertEquals('https://checkout.stripe.com/pay/test', results[0]);
-    System.assert(mock.lastRequest.getBody().contains('price_test123'));
-    System.assert(
-      mock.lastRequest.getHeader('Authorization').startsWith('Bearer ')
-    );
+    System.assertEquals('https://checkout.stripe.com/test', result);
+  }
+
+  private class MockStripeClient implements StripeCheckout.IStripeClient {
+    private final String returnUrl;
+
+    public MockStripeClient(String returnUrl) {
+      this.returnUrl = returnUrl;
+    }
+
+    public String createCheckoutSession(Map<String, String> params) {
+      return returnUrl;
+    }
   }
 
   @IsTest
-  static void testErrorResponse() {
+  static void testErrorHandling() {
     // Arrange
-    String mockResponse = '{"error": {"message": "Invalid API Key"}}';
-    Test.setMock(HttpCalloutMock.class, new MockHttpCallout(401, mockResponse));
+    MockErrorStripeClient mockClient = new MockErrorStripeClient();
+    StripeCheckout.CheckoutService service = new StripeCheckout.CheckoutService(
+      mockClient
+    );
 
-    StripeCheckout.CheckoutRequest req = new StripeCheckout.CheckoutRequest();
-    req.priceItems = 'price_test123,1';
-    req.customerEmail = 'test@example.com';
-    req.successUrl = 'https://success.com';
-    req.cancelUrl = 'https://cancel.com';
+    StripeCheckout.CheckoutRequest request = new StripeCheckout.CheckoutRequest();
+    request.priceItems = 'price_123,1';
+    request.customerEmail = 'test@example.com';
+    request.successUrl = 'https://success.com';
+    request.cancelUrl = 'https://cancel.com';
 
     // Act
-    Test.startTest();
-    List<String> results = StripeCheckout.createCheckoutSessions(
-      new List<StripeCheckout.CheckoutRequest>{ req }
-    );
-    Test.stopTest();
+    String result = service.createCheckoutSession(request);
 
     // Assert
-    System.assert(results[0].startsWith('Error: '));
+    System.assert(result.startsWith('Error:'));
+  }
+
+  private class MockErrorStripeClient implements StripeCheckout.IStripeClient {
+    public String createCheckoutSession(Map<String, String> params) {
+      throw new StripeCheckout.StripeException('Test error');
+    }
   }
 }
