@@ -35,15 +35,9 @@ public class StripeCheckout {
     public String createCheckoutSession(CheckoutRequest request) {
       try {
         Map<String, String> params = buildParams(request);
-        System.debug('About to call stripeClient.createCheckoutSession');
-        System.debug('stripeClient: ' + stripeClient);
         String result = stripeClient.createCheckoutSession(params);
-        System.debug('Result from createCheckoutSession: ' + result);
         return result;
       } catch (Exception e) {
-        System.debug('Exception type: ' + e.getTypeName());
-        System.debug('Exception message: ' + e.getMessage());
-        System.debug('Exception stack trace: ' + e.getStackTraceString());
         return 'Error: ' + e.getMessage();
       }
     }
